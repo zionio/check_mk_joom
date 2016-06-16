@@ -1,0 +1,63 @@
+#!/bin/bash
+# @andrea 2015
+#
+
+# Place this script into your local plugin directory
+
+
+if type units >/dev/null
+then
+
+if [ -f "$MK_CONFDIR/mk_joom.cfg" ]; then
+	source "$MK_CONFDIR/mk_joom.cfg"
+fi
+
+memory_critical=${memory_critical:-128}
+memory_warning=${memory_warning:-256}
+
+mk_check_name="JOOM"
+
+memtotal=$(units -1t `grep MemTotal /proc/meminfo | cut -d: -f2 | tr -d '[[:space:]]'` MB| cut -d. -f1)
+
+for xmx_pid in `pgrep -f "Xmx[0-9a-zA-Z]"`
+ do
+	xmx=$(ps -fp $xmx_pid | egrep -oh 'Xmx[0-9a-zA-Z]*' | head -1 | cut -d'x' -f2 | tr [a-z] [A-Z])
+	if [ ! -z "$xmx" ]; then
+		_xmx=$(units -1t ${xmx}B MB)
+		xmxsum=$(expr $xmxsum + $_xmx)
+	fi
+ done
+
+for perm_pid in `pgrep -f "MaxPermSize=[0-9a-zA-Z]"`
+ do 
+	perm=$(ps -fp $perm_pid | egrep -oh 'MaxPermSize=[0-9a-zA-Z]*' | head -1 | cut -d'=' -f2 | tr [a-z] [A-Z])
+	if [ ! -z "$perm" ]; then
+		_perm=$(units -1t ${perm}B MB)
+		permsum=$(expr $permsum + $_perm)
+	fi
+ done
+
+jboss_instance_number=$(pgrep -f "D\[Server:[0-9a-zA-Z]*"|wc -l)
+getent passwd tomcat >/dev/null && tomcat_instance_number=$(pgrep -u tomcat|wc -l) || tomcat_instance_number=0
+instance_number=$(expr $jboss_instance_number + $tomcat_instance_number)
+
+[ -z "$xmx" ] && xmxsum=0
+[ -z "$perm" ] && permsum=0
+
+jvmsum=$(expr $xmxsum + $permsum)
+memleft=$(expr $memtotal - $jvmsum)
+jvmwarn=$(expr $memtotal - $memory_warning)
+jvmcrit=$(expr $memtotal - $memory_critical)
+memneed=$(expr $jvmsum + $memory_warning)
+
+jvmsum="${jvmsum}.0"
+memleft="${memleft}.0"
+jvmwarn="${jvmwarn}.0"
+jvmcrit="${jvmcrit}.0"
+memneed="${memneed}.0"
+
+perf_data="mem_total=${memtotal}|xmx=${xmxsum}|maxpermsize=${permsum}|instance_number=${instance_number}|jvm=${jvmsum}|memleft=${memleft};${memory_warning}:${memtotal};${memory_critical}:${memtotal}"
+
+echo "P $mk_check_name $perf_data MemTotal: $memtotal, MemNeeded: $memneed, Instances: $instance_number, JVMTotal: $jvmsum, (warn/crit at $memory_warning/$memory_critical)"
+
+fi
